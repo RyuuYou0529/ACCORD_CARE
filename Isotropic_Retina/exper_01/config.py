@@ -6,6 +6,9 @@ sys.path.append(GLOBAL_CONFIG_PATH)
 
 import global_config as GC
 
+# Global Model Path
+GLOBAL_MODEL_PATH = GC.MODELS_PATH
+
 # Data path
 DATASET_BASE_PATH = path.join(GC.CARE_DATA_BASE_PATH, 'Isotropic_Retina')
 

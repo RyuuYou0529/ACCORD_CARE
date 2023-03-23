@@ -1,10 +1,7 @@
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *
 from tensorflow.keras.optimizers import *
-from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
-from tensorflow.keras.utils import plot_model
-from csbdeep.utils import plot_some
-from matplotlib import pyplot as plt
+from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard, ReduceLROnPlateau
 import tensorflow as tf
 
 import os
@@ -17,8 +14,11 @@ class mwunet():
     def __init__(self, 
                 input_shape=[128,128,1],
                 output_shape=[128,128,1],
-                n_conv_per_scale=3, 
+                n_conv_per_scale=3,
+                conv_kernel_size=3,
                 n_filters_per_scale=[16, 32, 64],
+                if_droupout = True,
+                droupout_rate=0.5,
                 pretrained_weights=None) -> None:
         with tf.name_scope('input'):
             inputs = Input(input_shape, name='Inputs')
@@ -26,47 +26,54 @@ class mwunet():
         with tf.name_scope('down_1'):
             down1 = self.DWT(inputs)
             for _ in range(n_conv_per_scale):
-                down1 = Conv2D(n_filters_per_scale[0], 3, padding='same')(down1)
+                down1 = Conv2D(n_filters_per_scale[0], conv_kernel_size, padding='same')(down1)
                 down1 = Activation(activation='relu')(down1)
+            if if_droupout:
+                down1 = Dropout(droupout_rate)(down1)
 
         with tf.name_scope('down_2'):
             down2 = self.DWT(down1)
             for _ in range(n_conv_per_scale):
-                down2 = Conv2D(n_filters_per_scale[1], 3, padding='same')(down2)
+                down2 = Conv2D(n_filters_per_scale[1], conv_kernel_size, padding='same')(down2)
                 down2 = Activation(activation='relu')(down2)
+            if if_droupout:
+                down2 = Dropout(droupout_rate)(down2)
 
         with tf.name_scope('middle'):
             middle = self.DWT(down2)
             for _ in range(n_conv_per_scale - 1):
-                middle = Conv2D(n_filters_per_scale[2], 3, padding='same')(middle)
+                middle = Conv2D(n_filters_per_scale[2], conv_kernel_size, padding='same')(middle)
                 middle = Activation(activation='relu')(middle)
-            middle = Conv2D(n_filters_per_scale[1] * 4, 3, padding='same')(middle)
+            middle = Conv2D(n_filters_per_scale[1] * 4, conv_kernel_size, padding='same')(middle)
             middle = Activation(activation='relu')(middle)
+            if if_droupout:
+                middle = Dropout(droupout_rate)(middle)
 
         with tf.name_scope('up_1'):
             up1 = self.IWT(middle, output_shape[0] // 8)
             up1 = up1 + down2
             for _ in range(n_conv_per_scale - 1):
-                up1 = Conv2D(n_filters_per_scale[1], 3, padding='same')(up1)
+                up1 = Conv2D(n_filters_per_scale[1], conv_kernel_size, padding='same')(up1)
                 up1 = Activation(activation='relu')(up1)
-            up1 = Conv2D(n_filters_per_scale[0] * 4, 3, padding='same')(up1)
+            up1 = Conv2D(n_filters_per_scale[0] * 4, conv_kernel_size, padding='same')(up1)
             up1 = Activation(activation='relu')(up1)
+            # if if_droupout:
+            #     up1 = Dropout(droupout_rate)(up1)
 
         with tf.name_scope('up_2'):
             up2 = self.IWT(up1, output_shape[0] // 4)
             up2 = up2 + down1
             for _ in range(n_conv_per_scale):
-                up2 = Conv2D(n_filters_per_scale[0], 3, padding='same')(up2)
+                up2 = Conv2D(n_filters_per_scale[0], conv_kernel_size, padding='same')(up2)
                 up2 = Activation(activation='relu')(up2)
+            # if if_droupout:
+            #     up2 = Dropout(droupout_rate)(up2)
 
         conv = Conv2D(4, 1, padding='same')(up2)
         outputs = self.IWT(conv, output_shape[0] // 2)
         outputs = inputs + outputs
 
         self.model = Model(inputs, outputs)
-
-        self.model.compile(optimizer=Adam(learning_rate=0.001, epsilon=1e-6), loss='mse',
-                    metrics=[self.SSIM, self.PSNR, 'mae'])
 
         if pretrained_weights:
             self.model.load_weights(pretrained_weights)
@@ -151,21 +158,33 @@ class mwunet():
             train_epochs,
             train_batch_size,
             base_dir,
-            train_checkpoint,
-            log_dir,
+            train_learning_rate=0.001,
+            train_reduce_lr=ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_delta=0),
+            name='my_models',
+            train_checkpoint='best_weights.hdf5',
+            log_dir='logs',
             ):
-        
-        self.model.summary()
 
-        model_checkpoint = ModelCheckpoint(os.path.join(base_dir, train_checkpoint), monitor='loss', verbose=1, save_best_only=True,
+        save_path = os.path.join(base_dir, name)
+
+        self.model.compile(optimizer=Adam(learning_rate=train_learning_rate, epsilon=1e-6), loss='mae',
+                    metrics=['mse'])
+
+        model_checkpoint = ModelCheckpoint(os.path.join(save_path, train_checkpoint), monitor='val_loss', verbose=1, save_best_only=True,
                                         save_weights_only=True, save_freq='epoch')
-        tensor_board = TensorBoard(os.path.join(base_dir, log_dir), update_freq='epoch', write_graph=True, write_images=True)
+        tensor_board = TensorBoard(os.path.join(save_path, log_dir), write_graph=True, profile_batch=0)
+        
+        if train_reduce_lr is not None:
+            callback_funcs = [model_checkpoint, tensor_board, train_reduce_lr] 
+        else:
+            callback_funcs = [model_checkpoint, tensor_board]
 
-        self.model.fit(x=X, y=Y, 
-                    validation_data=validation_data,
-                    epochs=train_epochs,
-                    batch_size=train_batch_size,
-                    callbacks=[model_checkpoint, tensor_board])
+        history = self.model.fit(x=X, y=Y, 
+                                validation_data=validation_data,
+                                epochs=train_epochs,
+                                batch_size=train_batch_size,
+                                callbacks=callback_funcs)
+        return history
         
     def predict(self, input):
         res = self.model.predict(input)
