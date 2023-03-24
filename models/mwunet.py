@@ -10,6 +10,12 @@ import warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 warnings.filterwarnings("ignore")
 
+def SSIM(y_true, y_pred):
+    return tf.reduce_mean(tf.image.ssim(y_true, y_pred, 1.0))
+
+def PSNR(y_true, y_pred):
+    return tf.reduce_mean(tf.image.psnr(y_true, y_pred, 1.0))
+
 class mwunet():
     def __init__(self, 
                 input_shape=[128,128,1],
@@ -77,14 +83,6 @@ class mwunet():
 
         if pretrained_weights:
             self.model.load_weights(pretrained_weights)
-
-    def SSIM(self, y_true, y_pred):
-        return tf.reduce_mean(tf.image.ssim(y_true, y_pred, 1.0))
-
-
-    def PSNR(self, y_true, y_pred):
-        return tf.reduce_mean(tf.image.psnr(y_true, y_pred, 1.0))
-
 
     def DWT(self, inputs):
         x01 = inputs[:, 0::2] / 2

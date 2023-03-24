@@ -1,7 +1,10 @@
 from os import path
 import sys
 
+# Windows
 GLOBAL_CONFIG_PATH = 'e:\\Project\\ACCORD_CARE'
+# MacOS
+# GLOBAL_CONFIG_PATH = '/Users/ryuuyou/Project/ACCORD_CARE'
 sys.path.append(GLOBAL_CONFIG_PATH)
 
 import global_config as GC
